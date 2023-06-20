@@ -1,0 +1,1019 @@
+<%@page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+<%@ taglib uri="http://java.sun.com/jsp/jstl/core" prefix="c" %>
+
+<!DOCTYPE html>
+<html lang="ko">
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+		<meta name="description" content="">
+		<meta name="author" content="">
+		
+		<!-- CSS -->
+		<link rel="stylesheet" type="text/css" href="../../resources/css/NanumSquareRound-master/nanumsquareround.min.css">
+		<link rel="stylesheet" type="text/css" href="../../resources/css/style.css">
+		<link rel="stylesheet" type="text/css" href="../../resources/css/dialog.css">
+		
+		<!-- JAVASCRIPT -->
+		<script src="../../resources/javascripts/jquery.min.js"></script>
+		<script src="../../resources/javascripts/bootstrap.min.js"></script>
+		
+		<!-- jsbn library -->
+		<script type="text/javascript" src="../../resources/javascripts/jsbn/jsbn.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/jsbn/jsbn2.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/jsbn/prng4.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/jsbn/rng.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/jsbn/rsa.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/jsbn/rsa2.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/jsbn/customEncrypter.js" ></script>
+		
+		<!-- scripts for this page -->
+		<script type="text/javascript" src="../../resources/javascripts/utilities/Logger.js" ></script>
+		
+		<script type="text/javascript" src="../../resources/javascripts/utilities/parameterHolder.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/utilities/xhrPromise.js" ></script>
+		
+		<script type="text/javascript" src="../../resources/javascripts/utilities/sessionData.js" ></script>
+		
+		<!-- 기타 유틸리티 함수들 -->
+		<script type="module" src="../../resources/javascripts/framework/vue.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/utilities/Printer.js" ></script>
+		<script type="module" src="../../resources/javascripts/utilities/Tools.js" ></script>
+		<script type="text/javascript" src="../../resources/javascripts/utilities/Security.js" ></script>
+		<script type="module">
+		//=========================
+		//
+		//	모듈 로딩
+		//
+		//=========================
+		import * as Tools from '../../resources/javascripts/utilities/Tools.js';
+		import { SoundEffectButton } from '../../resources/javascripts/utilities/Tools.js';
+		
+		Tools.createSession();
+		let logger = new Logger();
+		Logger.setPrintGlobally(true);
+		
+		onload = () => {
+			logger.log('=========================');
+			logger.log('15. 결제결과 페이지2');
+			
+			//=========================
+			//	상수
+			//=========================
+			const PAGE_SESSION_TIME = 15;
+			
+			/**
+			 * C# 모듈 상수 모음
+			 */
+			const KIOSK_INFO = JSON.parse(sessionStorage.getItem('kioskAppInformation'));
+			
+			/**
+			 * 키오스크 아이디
+			 */
+			const KIOSK_IDENTIFIER = KIOSK_INFO.kioskId;
+			
+			/**
+			 * 영수증 제목
+			 */
+			const TITLE_RECIPT = KIOSK_INFO.title;
+			
+			/**
+			 * 영수증 자동출력
+			 */
+			const AUTO_PRINT = KIOSK_INFO.AUTOPRINT;
+			
+			/**
+			 * 무인수납기 PC 현재시간
+			 */
+			const DATE_CURRENT_SYSTEM_TIME = new Date();
+			
+			/**
+			 * 카드 배출 기능 사용 여부
+			 */
+			const CARD_EJECT_AVAILABLE = (KIOSK_INFO.TerminalType == 1);
+			
+			/**
+			 * 결제 후처리 정상 종료 여부
+			 * 결제 후처리가 비정상적으로  끝난 경우 false, 정상적으로 끝났으면 true
+			 */
+			const AFTER_PAY_HANDLING_PROPERLY_DONE = session.payResult.afterPayHandlingProperlyDone;
+			
+			/**
+			 * 테이블 각 ROW HTML
+			 */
+			const TEMPLATE_TABLE_ROW = '\
+			<tr>\
+				<td class="text-left" style="padding: 0px;">?</td>\
+				<td class="text-left" style="padding: 0px;">?건</td>\
+				<td class="text-left font-weight-bold" style="padding: 0px;">?원</td>\
+				<td class="font-weight-bold" style="padding: 0px;">?</td>\
+				<td><a data-print-request class="btn-print" style="margin: 0; ?" onclick="newprintReceipt(\'?\')"/></td>\
+			</tr>';
+			
+			const PRINTER = new Printer();
+			
+			/**
+			 * 서명란
+			 */
+			const TEMPLATE_RECIPT_SIGNATURE = '\
+------------------------------------------\n\
+서명란\n\
+@PRINT_IMAGE:$[IMAGE_PATH]';
+			
+			/**
+			 * 세금 디테일
+			 */
+			const TEMPLATE_DETAIL = '\
+순번 : $[DETAIL_INDEX]\n\
+세목 : $[TAX_NAME]\n\
+금액 : $[AMOUNT]원\n\
+전자납부번호 : $[EPAY_NUMBER]\n\
+수용가 주소 : $[CONSUMER_ADDRESS]\n\n';
+			
+			/**
+			 * 모바일결제 영수증 템플릿
+			 */
+			const TEMPLATE_RECIPT_MOBILE = '\
+------------------------------------------\n\
+ $[TITLE]\n\
+ 자동화기기 거래명세표 (고객용)\n\
+------------------------------------------\n\
+$[TAX_TYPE_NAME] 총 납부금액 : $[AMOUNT]원$[PAY_STATUS]\n\
+실패내용 : $[FAILURE_MESSAGE]\n\
+------------------------------------------\n\
+거래일자 : $[DATE_TIME]\n\
+거래번호 : $[REQ_SEQ]\n\
+납부자명 : $[PAYER_NAME]\n\
+휴대폰번호 : ($[MOBILE_CARRIER]) $[PHONE_NUMBER]\n\
+승인번호 : $[APPROVAL_NUMBER]\n\
+------------------------------------------\n\
+결제 상세 내역\n\
+$[DETAILS]\n\
+$[PRINT_TEMPLATE]\n\
+------------------------------------------\n\
+본 영수증은 납부확인용이므로\n\
+과세증명서로 사용할 수 없습니다.\n\
+\n\
+\n';
+
+				/**
+				 * 카드결제 영수증 템플릿
+				 */
+				const TEMPLATE_RECIPT_CARD = '\
+------------------------------------------\n\
+ $[TITLE]\n\
+ 자동화기기 거래명세표 (고객용)\n\
+------------------------------------------\n\
+$[TAX_TYPE_NAME] 총 납부금액 : $[AMOUNT]원$[PAY_STATUS]\n\
+실패내용 : $[FAILURE_MESSAGE]\n\
+------------------------------------------\n\
+거래일자 : $[DATE_TIME]\n\
+거래번호 : $[REQ_SEQ]\n\
+납부자명 : $[PAYER_NAME]\n\
+카드번호 : $[CARD_NUMBER]\n\
+결제카드사 : $[CARD_COMPANY]\n\
+할부개월 : $[INSTALLMENT]\n\
+승인번호 : $[APPROVAL_NUMBER]\n\
+------------------------------------------\n\
+결제 상세 내역\n\
+$[DETAILS]\n\
+$[PRINT_TEMPLATE]\n\
+------------------------------------------\n\
+본 영수증은 납부확인용이므로\n\
+과세증명서로 사용할 수 없습니다.\n\
+\n\
+\n';
+			
+			
+window.newprintReceipt = (taxType) => {
+				// 프린트 한도 체크
+				if(session.sortedDataByTaxType[taxType].printCount == null) {
+					session.sortedDataByTaxType[taxType].printCount = 0;
+				}
+				if(session.sortedDataByTaxType[taxType].printCount != 2) {
+					session.sortedDataByTaxType[taxType].printCount++;
+				}
+				else {
+					$('#div-modal-recipt-ended').modal({
+						backdrop: 'static'
+					});
+					return;
+				}
+				
+				logger.log(taxType + ' 영수증 출력 시작');
+				
+				// 카드 결제인지 모바일 결제인지에 따라 영수증 템플릿 분기
+				let template = paidWithCard ? TEMPLATE_RECIPT_CARD : TEMPLATE_RECIPT_MOBILE;
+				// 현재 영수증 출력하려는 대상
+				let currentTaxData = session.sortedDataByTaxType[taxType];
+				// 현재 영수증 출력하려는 대상 항목의 결제 성공 여부
+				let paymentSucceed = currentTaxData.paymentSucceed;
+				
+				// 영수증 최상단 제목, 일반적으로 지자체명 사용
+				template = replacePlaceholder(template, 'TITLE', TITLE_RECIPT);
+				
+				// 세금명 (함수 인자로 받은 문자열)
+				template = replacePlaceholder(template, 'TAX_TYPE_NAME', taxType);
+				
+				// 거래금액
+				template = replacePlaceholder(template, 'AMOUNT', currentTaxData.totalAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+				
+				// 결제 성공 여부(금액 뒤에 붙는 문구)
+				// 성공일 경우에는 아무것도 붙이지 않는데 실패나 미시도인 경우에는 붙임
+				let statusTemplateLabel = '';
+				if(!paymentSucceed) {
+					// 결제가 성공이 아니면 paymentStatus 값이 '실패' 혹은 '미시도' 둘 중 하나임
+					statusTemplateLabel = '실패' === currentTaxData.paymentStatus ? ' - 납부처리 실패' : ' - 결제 중단';
+				}
+				template = replacePlaceholder(template, 'PAY_STATUS', statusTemplateLabel);
+				
+				// 실패내용
+				// 결제가 성공이 아닌 경우 왜 실패했는지 이유를 설명하는 부분, 성공인 경우에는 출력하지 않고 실패, 미시도에 따라 표시하는 문구가 달라짐
+				let failureMessage = '@DELETE_THIS_LINE';
+				if(!paymentSucceed) {
+					if('실패' === currentTaxData.paymentStatus) {
+						failureMessage = AFTER_PAY_HANDLING_PROPERLY_DONE ? session.payResult.failure.receiptResponse.sunap_result.split('#')[2] : '결제 후 처리가 비정상적으로 끝났습니다. 실패 내용을 확인할 수 없습니다.';
+						
+						// 메시지 사유가 없으면 아래 문구 대신 표시
+						if(failureMessage.length === 0) {
+							failureMessage = '카드결제 시간이 초과하였거나 사용자가 결제를 취소했습니다.';
+						}
+						
+						failureMessage = failureMessage.split('.').join('.\n');
+						failureMessage = failureMessage.split(')').join(')\n');
+						failureMessage = failureMessage.split('\n ').join('\n');
+					}
+					else if('미시도' === currentTaxData.paymentStatus) {
+						failureMessage = session.payResult.failure.taxType + '결제 실패로 인해\n결제가 중단되었습니다.';
+					}
+				}
+				template = replacePlaceholder(template, 'FAILURE_MESSAGE', failureMessage);
+				
+				// 거래일자 (yyyy-mm-dd hh:mm:ss)
+				template = replacePlaceholder(template, 'DATE_TIME', getCurrentDateTime());
+				
+				// 거래번호
+				template = replacePlaceholder(template, 'REQ_SEQ', session.reqSeq);
+				
+				// 납부자명
+				// 조회된 과세 데이터 중에서 가장 첫번째 데이터에 있는 납세자 성명을 납부자명으로 표기함
+				// 일반적으로 납세자 성명은 각 세금 데이터에 payerName 으로 저장되는데 없는 경우에는 수용가명 suyName 으로 가져옴
+				let payerName = session.checkMappedTaxDataList[0].data.payerName;
+				if(payerName == null) {
+					payerName = session.checkMappedTaxDataList[0].data.suyName;
+				}
+				template = replacePlaceholder(template, 'PAYER_NAME', payerName);
+				
+				if(paidWithCard) {
+					// 카드결제
+					
+					// 카드번호
+					let cardNumber = paymentSucceed ? session.payResult.success.cardNumber : session.payResult.failure.cardNumber;
+					if(cardNumber == null || cardNumber.length === 0) {
+						cardNumber = '@DELETE_THIS_LINE';
+					}
+					template = replacePlaceholder(template, 'CARD_NUMBER', cardNumber);
+					
+					// 카드사
+					let cardCompany = '@DELETE_THIS_LINE';
+					if(paymentSucceed) {
+						 cardCompany = currentTaxData.payResult.payList[0].PurchaseName;
+					}
+					template = replacePlaceholder(template, 'CARD_COMPANY', cardCompany);
+					
+					// 할부개월수
+					let installment = '@DELETE_THIS_LINE';
+					if(paymentSucceed) {
+						installment = currentTaxData.payResult.payList[0].Installment;
+						installment = installment == 0 ? '일시불' : installment + '개월';
+					}
+					template = replacePlaceholder(template, 'INSTALLMENT', installment);
+				}
+				else {
+					// 모바일결제
+					
+					// 휴대폰번호
+					// 납세자 입력에서 가져옴
+					let mobileCarrierName = session.payMethodData.mobileServiceCompany;
+					if('LGT' === mobileCarrierName) {
+						mobileCarrierName = 'LGU+';
+					}
+					else if('KTF' === mobileCarrierName) {
+						mobileCarrierName = 'KT';
+					}
+					
+					template = replacePlaceholder(template, 'MOBILE_CARRIER', mobileCarrierName);
+					template = replacePlaceholder(template, 'PHONE_NUMBER', session.payMethodData.maskedPhoneNumber);
+				}
+				
+				// 승인번호
+				let approvalNumber = '@DELETE_THIS_LINE';
+				if(paymentSucceed) {
+					approvalNumber = paidWithCard ? currentTaxData.payResult.payList[0].CorrectNum : currentTaxData.payResult.Re_Mobilid;
+				}
+				template = replacePlaceholder(template, 'APPROVAL_NUMBER', approvalNumber);
+				
+				// 세금 디테일
+				let details = '';
+				for(let index = 0; index < currentTaxData.data.length; index++) {
+					let currentDetailData = currentTaxData.data[index];
+					let detailTemplate = TEMPLATE_DETAIL;
+					
+					detailTemplate = replacePlaceholder(detailTemplate, 'DETAIL_INDEX', index + 1);
+					detailTemplate = replacePlaceholder(detailTemplate, 'TAX_NAME', currentDetailData.taxName);
+					detailTemplate = replacePlaceholder(detailTemplate, 'AMOUNT', currentDetailData.totalAmmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","));
+					
+					let epayNumber = (currentDetailData.sEsunap != null && currentDetailData.sEsunap.length !== 0 && currentDetailData.sEsunap !== 'null') ? currentDetailData.sEsunap : '@DELETE_THIS_LINE';
+					detailTemplate = replacePlaceholder(detailTemplate, 'EPAY_NUMBER', epayNumber);
+					
+					// 상하수도인 경우 수용가 주소를 추가적으로 표시
+					let suyAddr = currentDetailData.suyAddr;
+					if(suyAddr == null || suyAddr.length === 0) {
+						suyAddr = '@DELETE_THIS_LINE';
+					}
+					detailTemplate = replacePlaceholder(detailTemplate, 'CONSUMER_ADDRESS', suyAddr);
+					
+					details += detailTemplate;
+				}
+				template = replacePlaceholder(template, 'DETAILS', details);
+				
+				// 서명란
+				// 서명 이미지 파일이 존재하면 해당 이미지도 출력, 없는 경우 출력하지 않음
+				if(currentTaxData.payResult.payList && currentTaxData.payResult.payList[0].SignName.length !== 0) {
+					template = replacePlaceholder(template, 'PRINT_TEMPLATE', replacePlaceholder(TEMPLATE_RECIPT_SIGNATURE, 'IMAGE_PATH', currentTaxData.payResult.payList[0].SignName));					
+				}
+				else {
+					template = replacePlaceholder(template, 'PRINT_TEMPLATE', '@DELETE_THIS_LINE');
+				}
+				
+				print(template);
+			};
+			
+			
+			
+			//=========================
+			//
+			//	Vue
+			//
+			//=========================
+			Tools.setCursorIconVisiblity(${showCursorIcon});
+			Tools.togglePageMoveAnimation(KIOSK_INFO.usePageMoveAnimation);
+			let pageVue = new Vue({
+				el: '#pannel',
+				data: {
+					countdown: PAGE_SESSION_TIME
+				},
+				mounted: function() {
+					this.$nextTick(() => {
+						Tools.showPage();
+					});
+				}
+			});
+			
+			
+			//=========================
+			//
+			// 음성
+			//
+			//=========================
+			let introSound = new Audio('${pageContext.request.contextPath}_resource/sound/intro/' + 'finish.wav');
+			
+			// 상호작용 시 재생 중단할 음성 목록 등록
+			Tools.setPauseTargetAudios([
+				// introSound
+			]);
+			
+			introSound.play();
+			
+			
+			
+			//=========================
+			//
+			//	타이머 세팅
+			//
+			//=========================
+			// 결제 후처리가 비정상적인 경우 원래 페이지 세션시간의 2배를 대기할 수 있도록 함
+			let alternativePageSessionTime = PAGE_SESSION_TIME;
+			if(!AFTER_PAY_HANDLING_PROPERLY_DONE) {
+				alternativePageSessionTime = (PAGE_SESSION_TIME * 2);
+				logger.log('결제 후처리가 비정상적으로 종료되어 페이지 세션 타임이 ' + (PAGE_SESSION_TIME * 2) + '초로 변경되었음');
+			}
+			
+			// 페이지 제한시간 카운트다운 생성
+			let countdown = Tools.createPageCountdown(alternativePageSessionTime);
+			
+			countdown.addIntervalCallback(second => {
+				pageVue.countdown = second;
+			});
+
+			countdown.addDoneCallback(() => {
+				// 메인 페이지로 이동
+				Tools.movePage(session.getMainPageUrl());
+			});
+			// 이 페이지는 카운트다운 바로 시작하지 않음
+			// script 태그 가장 아래쪽 확인하세요
+			// countdown.startCountdown();
+			
+			
+			
+			//=========================
+			//
+			//	카드 배출 버튼 세팅
+			//
+			//=========================
+			let cardEjectButtons = Tools.setCardEjectButtons({
+				available: CARD_EJECT_AVAILABLE,
+				audioFilePath: '${pageContext.request.contextPath}_resource/sound/button.wav'
+			});
+			
+			// 카드 제거 안내 이미지 표기여부 지정
+			// 결제가 카드로 이루어졌고 세로 화면 무인수납기인 경우에만 표시함
+			if('card' === session.payMethodData.type && 'VERTICAL' === KIOSK_INFO.screenType) {
+				let cardAlarmDiv = document.getElementById('div-card-alarm');
+				cardAlarmDiv.style.display = 'block';
+			}
+			
+			
+			
+			//=========================
+			//
+			//	버튼 설정
+			//
+			//=========================
+			let homeButton = new SoundEffectButton({
+				buttonElement: document.getElementById('button-home'),
+				audioElement: new Audio('${pageContext.request.contextPath}_resource/sound/button.wav'),
+				buttonCallback: event => {
+					Tools.movePage(session.getMainPageUrl());
+				}
+			});
+			
+			
+			
+			//=========================
+			// 페이지 로직
+			//=========================
+			/**
+			 * 결제 성공건이 존재하는 경우 해당 납세자번호로 조회를 지정된 시간동안 불가능하게 만드는 기능을 호출
+			 */
+			let lockPayerNumnerIfPaymentSucceed = async () => {
+				let keys = Object.keys(session.sortedDataByTaxType);
+				for(let key of keys) {
+					let currentData = session.sortedDataByTaxType[key];
+					if(currentData.totalAmount > 0 && currentData.paymentSucceed) {
+						// 성공건 있는 경우 납세자번호 조회락 생성
+						await storePayerNumber(KIOSK_IDENTIFIER, session.encryptedPayerNumber)
+						.then(responseBody => {
+							// 요청결과 성공인 경우 아무것도 하지 않음
+						})
+						.catch(error => {
+							logger.log('납세자번호 조회 락 요청 과정에서 에러가 발생함\n' + error.message);
+						});
+						
+						break;
+					}
+				}
+			};
+			lockPayerNumnerIfPaymentSucceed();
+			
+			/**
+			 * 결제 실패 또는 미시도 건 존재할 경우 실패 내용 확인하라는 내용의 다이얼로그 표시
+			 */
+			let notifyFailureExists = () => {
+				if(!AFTER_PAY_HANDLING_PROPERLY_DONE) {
+					return;
+				}
+				
+				let keys = Object.keys(session.sortedDataByTaxType);
+				for(let key of keys) {
+					let currentData = session.sortedDataByTaxType[key];
+					if(currentData.totalAmount > 0 && !currentData.paymentSucceed) {
+						document.getElementById('dialog-failure-exists').showModal();
+						break;
+					}
+				}
+			};
+			notifyFailureExists();
+			
+			/*
+			// 성공이나 실패건 통합해서 보여줘야하는 경우 사용
+			createIntegratedReceipt = () => {
+				let integratedData = new Object();
+				integratedData.arrearsAmount = 0;
+				integratedData.arrearsCount = 0;
+				integratedData.data = new Array();
+				integratedData.payResult = null;
+				integratedData.paymentStatus = '성공';
+				integratedData.paymentSucceed = true;
+				integratedData.printCount = 0;
+				integratedData.totalAmount = 0;
+				
+				let keys = Object.keys(session.sortedDataByTaxType);
+				for(let key of keys) {
+					let currentData = session.sortedDataByTaxType[key];
+					if('성공' === currentData.paymentStatus) {
+						integratedData.arrearsAmount += currentData.arreasAmount;
+						integratedData.arrearsCount += currentData.arreasCount;
+						integratedData.data = integratedData.data.concat(currentData.data);
+						if(integratedData.payResult == null) {
+							integratedData.payResult = currentData.payResult;
+						}
+						integratedData.totalAmount += currentData.totalAmount;
+					}
+				}
+				
+				session.sortedDataByTaxType['성공통합'] = integratedData;
+			}
+			createIntegratedReceipt();
+			
+			integrateResults2 = () => {
+				let integratedData = new Object();
+				integratedData.arrearsAmount = 0;
+				integratedData.arrearsCount = 0;
+				integratedData.data = new Array();
+				integratedData.payResult = null;
+				integratedData.paymentStatus = '실패';
+				integratedData.paymentSucceed = false;
+				integratedData.printCount = 0;
+				integratedData.totalAmount = 0;
+				
+				let keys = Object.keys(session.sortedDataByTaxType);
+				for(let key of keys) {
+					let currentData = session.sortedDataByTaxType[key];
+					if('실패' === currentData.paymentStatus || '미시도' === currentData.paymentStatus) {
+						integratedData.arrearsAmount += currentData.arreasAmount;
+						integratedData.arrearsCount += currentData.arreasCount;
+						integratedData.data = integratedData.data.concat(currentData.data);
+						if(integratedData.payResult == null) {
+							integratedData.payResult = currentData.payResult;
+						}
+						integratedData.totalAmount += currentData.totalAmount;
+					}
+				}
+				
+				session.sortedDataByTaxType['실패통합'] = integratedData;
+			};
+			integrateResults2();
+			*/
+			
+			window.showFailureReason = taxType => {
+				let currentTaxData = session.sortedDataByTaxType[taxType];
+				let failureMessage = null;
+				let modalContent = document.getElementById('label-modal-pay-failure-message');
+				
+				if('실패' === currentTaxData.paymentStatus) {
+					failureMessage = AFTER_PAY_HANDLING_PROPERLY_DONE ? session.payResult.failure.receiptResponse.sunap_result.split('#')[2] : '결제 후 처리가 비정상적으로 끝났습니다. 실패 내용을 확인할 수 없습니다.';
+					
+					// 메시지 사유가 없으면 아래 문구 대신 표시
+					if(failureMessage.length === 0) {
+						failureMessage = '카드결제 시간이 초과하였거나 사용자가 결제를 취소했습니다.';
+					}
+					
+					failureMessage = failureMessage.split('.').join('.<br>');
+					failureMessage = failureMessage.split(')').join(')<br>');
+					failureMessage = failureMessage.split('\n ').join('<br>');
+				}
+				else if('미시도' === currentTaxData.paymentStatus) {
+					failureMessage = session.payResult.failure.taxType + '결제 실패로 인해<br>결제가 중단되었습니다.';
+				}
+				
+				modalContent.innerHTML = failureMessage
+				
+				$('#div-modal-pay-failure-reason').modal({
+					backdrop: 'static'
+				});
+			}
+				
+			/**
+			 * 앞자리 빈 부분에 0을 붙임
+			 */
+			let fillZero = (length, string) => {
+				string = string.toString();
+				
+				return string.length >= length ? string: new Array(length - string.length + 1).join('0') + string;
+			}
+			
+			/**
+			 * 현재 날짜를 포맷에 맞춰서 가져오는 함수
+			 */
+			let getCurrentDateTime = () => {
+				let dateTimeString = '?-?-? ?:?:?';
+				
+				dateTimeString = dateTimeString.replace('?'
+					, (DATE_CURRENT_SYSTEM_TIME.getYear() - 100)
+				);
+				
+				dateTimeString = dateTimeString.replace('?'
+					, fillZero(2, (DATE_CURRENT_SYSTEM_TIME.getMonth() + 1))
+				);
+				
+				dateTimeString = dateTimeString.replace('?'
+					, fillZero(2, DATE_CURRENT_SYSTEM_TIME.getDate())
+				);
+				
+				dateTimeString = dateTimeString.replace('?'
+					, fillZero(2, DATE_CURRENT_SYSTEM_TIME.getHours())
+				);
+				
+				dateTimeString = dateTimeString.replace('?'
+					, fillZero(2, DATE_CURRENT_SYSTEM_TIME.getMinutes())
+				);
+				
+				dateTimeString = dateTimeString.replace('?'
+					, fillZero(2, DATE_CURRENT_SYSTEM_TIME.getSeconds())
+				);
+				
+				return dateTimeString;
+			}
+			
+			// 결제 후처리 비정상적인 경우 안내 모달 표시
+			if(!AFTER_PAY_HANDLING_PROPERLY_DONE) {
+				$('#div-modal-afterPayHandlingGoneWrong').modal({
+					backdrop: 'static'
+				});
+			}
+			
+			// 카드(nfc)로 결제되었는지 여부
+			let paidWithCard = ('card' === session.payMethodData.type || 'nfc' === session.payMethodData.type) ? true : false;
+			
+			if(paidWithCard) {
+				document.getElementById('label-message').innerHTML = '결제결과 처리는 최대 1분 소요될 수 있습니다.<br><strong style="color: #7156d6">카드가 삽입되어 있는 경우 카드를 제거 해 주시기 바랍니다.</strong>';
+			}
+			
+			// 결제 수단 관계없이 자동출력모드면 자동출력 안내문구 추가시킴
+			if(AUTO_PRINT) {
+				document.getElementById('label-message').innerHTML += '<br><strong style="color: #507aff;">영수증은 자동출력</strong>되며, 기기 하단 영수증 나오는곳에 있습니다.';
+			}
+			
+			// 결제 결과 출력 테이블
+			let resultTable = document.getElementById('table-result');
+			// 각 세금 종류별 결제 결과 데이터 표시하는 테이블 ROW 생성하는 함수
+			let createNewRow = () => {
+				let dataList = session.sortedDataByTaxType;
+
+				let keys = Object.keys(dataList);
+				for(let i = 0; i < keys.length; i++) {
+					let currentKey = keys[i];
+					let currentData = dataList[currentKey];
+					let currentDataStatus = currentData.paymentStatus;
+					
+					// 금액이 0인 세금은 결과 테이블에 표시하지 않고 다음 루프로
+					if(currentData.totalAmount == 0) {
+						continue;
+					}
+					
+					let template = TEMPLATE_TABLE_ROW;
+					
+					// 세금종류 (지방세, 세외수입, 주정차 등등)
+					template = template.replace('?', currentKey);
+					
+					// 해당 세금 납부 건수
+					template = template.replace('?', currentData.data.length);
+					
+					// 해당 세금 총 금액
+					template = template.replace('?', currentData.totalAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","));
+					
+					// 해당 세금 결제 성공여부
+					template = template.replace('?', currentDataStatus === '성공' ? '<span class="circleBlue">성공</span>' : (currentDataStatus === '실패' ? '<span class="circleRed" onclick="showFailureReason(\'' + currentKey + '\')">실패</span>' : '미시도'));
+					
+					// 영수증 출력 버튼 표시여부, 미시도이면 보여주지 않음
+					if(currentDataStatus === '미시도') {
+						template = template.replace('?', 'visibility: hidden;');
+					}
+					else {
+						template = template.replace('?', '');
+					}
+					
+					// 영수증 출력 버튼 onClick 이벤트리스너가 호출하는 함수 인자값 설정하는 부분
+					template = template.replace('?', currentKey);
+					
+					let newTBody = resultTable.createTBody();
+					newTBody.innerHTML = template;
+					newTBody.classList.add('bottomBorder');
+				}
+			}
+			createNewRow();
+			
+			// 이 아래는 영수증 출력 로직들
+			/**
+			 * $[] 으로 감싸진 플레이스홀더를 치환하는 함수 중괄호가 아님에 주의
+			 */
+			let replacePlaceholder = (template, placeholderName, replacement) => {
+				return template.replace('$[' + placeholderName + ']', replacement);
+			}
+			
+			
+		let print = message => {
+				let printMessage = new Object();
+				printMessage.commandList = new Array();
+				
+				let tokenList = message.split('\n');
+				let currentCommand = null;
+				
+				for(let line of tokenList) {
+					if(line.startsWith('@PRINT_IMAGE:')) {
+						// 이미지 출력
+						currentCommand = Printer.createWriteImageCommand(line.replace('@PRINT_IMAGE:', ''));
+					}
+					else if(line.includes('@DELETE_THIS_LINE')) {
+						// 해당 줄 출력하지 않음
+						continue;
+					}
+					else if(line.trim().length === 0) {
+						// 해당 라인이 비어있는 경우 개행
+						currentCommand = Printer.createNewLineCommand();
+					}
+					else {
+						// 해당 라인 문자열 출력
+						currentCommand = Printer.createWriteTextCommand(line);
+					}
+					
+					printMessage.commandList.push(currentCommand);
+				}
+				
+				// 하프커팅 추가
+				printMessage.commandList.push(Printer.createHalfCuttingCommand());
+				
+				// 프린트 요청
+				if(webInterface) {
+					webInterface.reqPrint(JSON.stringify(printMessage));
+				}
+			}
+		
+			
+			// 프린트가 완료 또는 실패한 뒤 응답을 위해 외부(C#)에서 호출하는 함수
+			window.callBackPrint = message => {
+				let parsedMessage = JSON.parse(message);
+				
+				session.payResult.printResult = parsedMessage;
+				Tools.storeSession();
+				
+				if(parsedMessage.resultCode == '0000') {
+					logger.log('영수증 출력 성공');
+					
+					// 프린트 성공
+					// Tools.movePage(session.getMainPageUrl());
+				}
+				else {
+					// 프린트 실패
+					logger.log('영수증 출력 실패 : ');
+					logger.log(parsedMessage.resultMsg);
+					document.getElementById('label-modal-print-failure-message').innerText = '사유 : ' + parsedMessage.resultMsg;
+					$('#modal-print-failure').modal({
+						backdrop: 'static'
+					});
+				}
+				
+				let printOnProcess = false;
+				
+				// 자동출력 진행중이면 계속 출력을 시도함
+				if(AUTO_PRINT && !autoPrintEnded) {
+					// 더이상 출력할 영수증이 없으면 종료
+					if(currentPrintTargetIndex == (printButtons.length - 1)) {
+						// 만약 버튼 상호작용이 막혀있는 상태이면 다시 상호작용이 가능하도록 만듬
+						if(SoundEffectButton.blocked) {
+							SoundEffectButton.activateButtonEvent();
+							countdown.startCountdown();
+						}
+						
+						logger.log('영수증 자동 출력 완료됨');
+						autoPrintEnded = true;
+						return;
+					}
+					
+					currentPrintTargetIndex++;
+					printButtons[currentPrintTargetIndex].click();
+				}
+			}
+			
+			
+			
+			//=========================
+			// 페이지 객체 이벤트리스너 처리
+			//=========================
+			// 이전 버튼
+			/*let previousButton = new SoundEffectButton({
+				document.getElementById("button-previous-page"),
+				new Audio("${pageContext.request.contextPath}_resource/sound/button.wav"),
+				event => {
+					SoundEffectButton.blockButtonEvent();
+					// 결제수단 선택 페이지로 돌아갑니다.
+					Tools.movePage('method');
+			});*/
+			
+			// 페이지가 바뀐 순간에는
+			// 버튼이 사용 불가능
+			// 페이지 카운트다운이 멈춰있는 상태
+			SoundEffectButton.blockButtonEvent();
+			setTimeout(() => {
+				// 페이지 변경 후 5초 경과 후부터 버튼이 사용 가능해지고 카운트다운이 시작됨
+				// 그러나 만약 자동출력이 진행중이라면 그냥 놓아둠
+				if(!AUTO_PRINT) {
+					SoundEffectButton.activateButtonEvent();
+					countdown.startCountdown();
+				}
+			}, 5000);
+			
+			// 출력 버튼 목록
+			let printButtons = document.getElementById('table-result').querySelectorAll('[data-print-request]');
+			
+			// 현재 출력 대상
+			let currentPrintTargetIndex = null;
+			// 자동결제 완료됨 플래그
+			let autoPrintEnded = false;
+			// 자동출력이 활성화된 상태이면 자동출력 시작
+			if(AUTO_PRINT) {
+				logger.log('영수증 자동 출력 시작됨');
+				currentPrintTargetIndex = 0;
+				if(printButtons != null && printButtons.length > 0) {
+					printButtons[0].click();	
+				}
+			}
+		}
+		</script>
+	
+		<title>무인수납기</title>
+	</head>
+
+	<body>
+		<!-- 실패 사유 모달 시작 -->
+		<div class="modal fade" id="div-modal-pay-failure-reason">
+			<div class="modal-dialog">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h4 class="modal-title"><img src="../../resources/images/info.png" alt="" /></h4>
+					</div>
+					<div class="modal-body">
+						<h5>결제 실패 사유 안내</h5>
+						<p id="label-modal-pay-failure-message"></p>
+					</div>
+					<div class="modal-footer">
+						<ul>
+							<li><a class="btn-blue07" data-dismiss="modal" aria-label="Close">닫기</a></li>
+						</ul>
+					</div>
+				</div>
+			</div>
+		</div>
+		<!-- 실패 사유 모달 끝 -->
+		
+		<!-- 영수증 출력 불가 모달 시작 -->
+		<div class="modal fade" id="div-modal-recipt-ended">
+			<div class="modal-dialog">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h4 class="modal-title"><img src="../../resources/images/error.png" alt="" /></h4>
+					</div>
+					<div class="modal-body">
+						<h5>영수증 출력이 불가능합니다.</h5>
+						<p>영수증을 최대 한도까지 출력했습니다.<br><br>추가적인 영수증 출력이 필요한 경우<br>담당자에게 문의 바랍니다.</p>
+					</div>
+					<div class="modal-footer">
+						<ul>
+							<li><a class="btn-blue07" data-dismiss="modal" aria-label="Close">닫기</a></li>
+						</ul>
+					</div>
+				</div>
+			</div>
+		</div>
+		<!-- 영수증 출력 불가 모달 끝 -->
+		
+		<!-- 영수증 출력 불가 모달 시작 -->
+		<div class="modal fade" id="modal-print-failure">
+			<div class="modal-dialog">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h4 class="modal-title"><img src="../../resources/images/error.png" alt="" /></h4>
+					</div>
+					<div class="modal-body">
+						<h5>영수증 출력이 불가능합니다.</h5>
+						<p id="label-modal-print-failure-message"></p>
+					</div>
+					<div class="modal-footer">
+						<ul>
+							<li><a class="btn-blue07" data-dismiss="modal" aria-label="Close">닫기</a></li>
+						</ul>
+					</div>
+				</div>
+			</div>
+		</div>
+		<!-- 영수증 출력 불가 모달 끝 -->
+		
+		<!-- 결제 후처리 비정상 감지 모달 -->
+		<div class="modal fade" id="div-modal-afterPayHandlingGoneWrong">
+			<div class="modal-dialog">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h4 class="modal-title"><img src="../../resources/images/warning.png" alt="" /></h4>
+					</div>
+					<div class="modal-body">
+						<h5>수납처리 확인이<br>필요합니다.</h5>
+						<p>결제 결과 처리가 비정상적으로<br>종료된 것으로 보입니다.<br><br>담당자에게 수납처리가 정상적으로<br>이루어졌는지 여부를 확인해주세요.</p>
+					</div>
+					<div class="modal-footer">
+						<ul>
+							<li><a class="btn-blue07" data-dismiss="modal" aria-label="Close">닫기</a></li>
+						</ul>
+					</div>
+				</div>
+			</div>
+		</div>
+		<!-- 결제 후처리 비정상 감지 모달 끝 -->
+	
+	
+		<div data-main-pannel id="pannel" class="wrap">
+			<!-- 다이얼로그 결제 실패 알림 -->
+			<dialog id="dialog-failure-exists">
+				<div class="header">
+					<img src="../../resources/images/warning.png" alt="경고 아이콘" />
+					<h4>결제 실패 내역이 존재합니다.</h4>
+				</div>
+				<div class="body">
+					<p>영수증에 표시된 실패 내용을 확인해주세요.</p>
+				</div>
+				<form method="dialog">
+					<button style="font-family:'NanumSquareRound',sans-serif;">확인</button>
+				</form>
+			</dialog>
+		
+			<div data-inner-pannel class="Innerwrap" style="visibility: hidden;">
+				<span class="logo float-right"><img class="logoImage" src="${pageContext.request.contextPath}_resource/image/logo/simple_logo.png" alt="지자체 로고" /></span>
+				<div class="title text-center">
+					<h1>결제 결과</h1>
+					<p id="label-message">결제결과 처리는 최대 1분 소요될 수 있습니다.</p>
+				</div>
+				
+				<section>
+					<div>
+						<div class="tableOut">
+							<table id="table-result" cellpadding="0" cellspacing="0" class="tableChoice">
+								<caption>과세내역</caption>
+								<colgroup>
+									<col width="20%" />
+									<col width="15%" />
+									<col width="40%" />
+									<col width="15%" />
+									<col width="10%" />
+								</colgroup>
+								<thead>
+									<tr>
+										<th class="text-left">세목</th>
+										<th class="text-left">건수</th>
+										<th class="text-left">금액</th>
+										<th>결제여부</th>
+										<th style="font-size: 1.1em;">영수증<br>추가 출력</th>
+									</tr>
+								</thead>
+								
+								<!-- 더미 -->
+								<!-- 
+								<tbody class="bottomBorder">
+									<tr>
+										<td class="text-left" style="padding: 0px;">더미</td>
+										<td class="text-left" style="padding: 0px;">42건</td>
+										<td class="text-left" style="padding: 0px;">140,000</td>
+										<td style="padding: 0px;">성공</td>
+										<td><a class="btn-search launch-modal" style="margin: 0;"></a></td>
+									</tr>
+								</tbody>
+								 -->
+
+							</table>
+						</div>
+					</div>
+					
+					
+					<div id="div-card-alarm" class="cardGif" style="display: none;">
+						<span><strong>카드를 빼주세요.</strong></span>
+						<img src="../../resources/images/card.gif" alt="카드를 제거해주세요.">
+					</div>
+					
+					<ul class="btn03" style="width:940px;margin:0 auto">
+						<li><a id="button-home" class="btn-blue10" style="margin-left:10px">종료</a></li>
+					</ul>
+					<div class="searchBox03">
+						<p>입력이 없으면 초기화면으로 돌아갑니다.<span>{{ countdown }}초</span></p>
+					</div>
+					<ul class="level">
+						<li><img src="../../resources/images/dot-on.png" alt="1단계" /></li>
+						<li><img src="../../resources/images/dot-on.png" alt="2단계" /></li>
+						<li><img src="../../resources/images/dot-on.png" alt="3단계" /></li>
+						<li><img src="../../resources/images/dot-on.png" alt="4단계" /></li>
+						<li><img src="../../resources/images/dot-on.png" alt="5단계" /></li>
+					</ul>
+				</section>
+				
+				<div class="footer">
+					<!-- <p class="largesize01">입력이 없으면 초기화면으로 돌아갑니다.<span>{{ countdown }}초</span></p> -->
+					<span class="bottomBtn">
+						<!-- <button id="button-home" class="btnHome">처음으로</button> -->
+						<button data-card-eject-button class="btnRemove smallsize01">카드 긴급 제거</button>
+						<button data-card-eject-button class="btnRemove largesize01">카드 긴급 제거</button>
+					</span>
+					<span class="logo02 float-right"><img class="logoImage" src="${pageContext.request.contextPath}_resource/image/logo/simple_logo.png" alt="지자체 로고" /></span>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>

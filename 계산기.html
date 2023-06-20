@@ -1,0 +1,12 @@
+function generateLottoNumbers() {
+    const lottoNumbers = [];
+    while (lottoNumbers.length < 6) {
+      const number = Math.floor(Math.random() * 45) + 1;
+      if (!lottoNumbers.includes(number)) {
+        lottoNumbers.push(number);
+      }
+    }
+    return lottoNumbers;
+  }
+  
+  console.log(generateLottoNumbers());
